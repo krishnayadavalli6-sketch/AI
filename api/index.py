@@ -28,7 +28,11 @@ groq_client = Groq(
 @app.route('/')
 def index():
     """Renders the single-page interactive glassmorphic dashboard."""
-    return render_template('index.html')
+    return render_template(
+        'index.html',
+        supabase_url=os.environ.get('SUPABASE_URL', ''),
+        supabase_anon_key=os.environ.get('SUPABASE_ANON_KEY', '')
+    )
 
 @app.route('/api/health', methods=['GET'])
 def health_check():
@@ -135,4 +139,4 @@ def generate_strategy_matrix():
         }), 500
 
 if __name__ == '__main__':
-    app.run(debug=True)
+    app.run(debug=True, port=int(os.environ.get('PORT', 5000)))
