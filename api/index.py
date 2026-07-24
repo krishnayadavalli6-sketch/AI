@@ -6,24 +6,29 @@ from dotenv import load_dotenv
 import httpx
 from groq import Groq
 
-# Force load environment variables from the project root workspace directory
+# Load environment variables locally
+load_dotenv()
 load_dotenv(os.path.join(os.path.dirname(__file__), '../.env'))
 
-app = Flask(__name__, template_folder='../templates')
-
-# Pre-flight verification check to help diagnose local errors in the terminal console
-api_key = os.environ.get("GROQ_API_KEY")
-if not api_key:
-    print("\n[CRITICAL WARNING] 'GROQ_API_KEY' environment variable was not found!")
-    print("Ensure your .env file is positioned in the project root directory and contains a valid key.\n")
+# Resolve template directory dynamically for Vercel Serverless environment
+base_dir = os.path.dirname(os.path.abspath(__file__))
+if os.path.exists(os.path.join(base_dir, '../templates')):
+    template_dir = os.path.join(base_dir, '../templates')
+elif os.path.exists(os.path.join(base_dir, 'templates')):
+    template_dir = os.path.join(base_dir, 'templates')
 else:
-    print(f"\n[SYSTEM INITIALIZATION] Groq API client verified. Key Prefix: {api_key[:6]}...\n")
+    template_dir = base_dir
 
-# Initialize the uncompromised HTTP client wrapper configuration
-groq_client = Groq(
-    api_key=api_key,
-    http_client=httpx.Client()
-)
+app = Flask(__name__, template_folder=template_dir)
+
+def get_groq_client():
+    api_key = os.environ.get("GROQ_API_KEY")
+    if not api_key:
+        raise ValueError("GROQ_API_KEY environment variable is missing or empty.")
+    return Groq(
+        api_key=api_key,
+        http_client=httpx.Client()
+    )
 
 @app.route('/')
 def index():
@@ -63,7 +68,6 @@ def generate_strategy_matrix():
 
         skills_csv = ", ".join(selected_skills)
         
-        # Rigorous US economic matrix tailoring configuration rules
         system_instruction = (
             "You are an expert AI/ML Solutions Architect and United States macro-economic strategy engine specializing in career navigation intelligence.\n"
             "Your objective is to ingest a US student or professional's career DNA parameters and synthesize 3 distinct, tailored alternative US career paths.\n"
@@ -111,7 +115,8 @@ def generate_strategy_matrix():
             f"Calculate the US economic matrices, technical certifications required, and compute standard USD gross compensation brackets."
         )
 
-        # Execute ultra-high-speed LLM completion via active GPT-OSS 20B framework
+        groq_client = get_groq_client()
+
         completion = groq_client.chat.completions.create(
             model="openai/gpt-oss-20b", 
             messages=[
@@ -129,7 +134,6 @@ def generate_strategy_matrix():
         return jsonify(structured_matrix_data)
 
     except Exception as err:
-        # Prints complete stack tracing logs directly to your terminal console
         print("\n-------- [FLASK API RUNTIME ERROR TRACKING LOG] --------")
         traceback.print_exc()
         print("--------------------------------------------------------\n")
