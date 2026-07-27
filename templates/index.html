@@ -1,0 +1,863 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PathFinder AI - Next-Gen US Career Intelligence Matrix</title>
+    
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:ital,wght@0,300..800;1,300..800&family=JetBrains+Mono:ital,wght@0,300..800;1,300..800&display=swap" rel="stylesheet">
+    
+    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+
+    <style>
+        :root {
+            --font-sans: 'Plus Jakarta Sans', sans-serif;
+            --font-mono: 'JetBrains Mono', monospace;
+        }
+
+        body {
+            font-family: var(--font-sans);
+            background-color: #030712;
+            background-image: 
+                radial-gradient(at 10% 10%, rgba(99, 102, 241, 0.12) 0px, transparent 50%),
+                radial-gradient(at 90% 10%, rgba(168, 85, 247, 0.12) 0px, transparent 50%),
+                radial-gradient(at 50% 90%, rgba(6, 182, 212, 0.10) 0px, transparent 50%);
+            background-attachment: fixed;
+        }
+
+        .font-mono { font-family: var(--font-mono) !important; }
+
+        .glass-panel {
+            background: rgba(15, 23, 42, 0.65);
+            backdrop-filter: blur(24px);
+            -webkit-backdrop-filter: blur(24px);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            box-shadow: 0 30px 60px -12px rgba(0, 0, 0, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.1);
+        }
+
+        .glass-card {
+            background: rgba(30, 41, 59, 0.35);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            border: 1px solid rgba(255, 255, 255, 0.05);
+            box-shadow: 0 10px 30px -5px rgba(0, 0, 0, 0.2);
+            transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+
+        .glass-card:hover {
+            border-color: rgba(99, 102, 241, 0.35);
+            box-shadow: 0 15px 35px -5px rgba(99, 102, 241, 0.15);
+            transform: translateY(-2px);
+        }
+
+        .glass-input {
+            background: rgba(3, 7, 18, 0.7);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            transition: all 0.2s ease;
+        }
+
+        .glass-input:focus {
+            border-color: #6366f1;
+            box-shadow: 0 0 20px rgba(99, 102, 241, 0.25);
+            outline: none;
+        }
+
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-track { background: #030712; }
+        ::-webkit-scrollbar-thumb { background: #1e293b; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: #6366f1; }
+    </style>
+</head>
+<body class="text-slate-100 font-sans min-h-screen flex flex-col justify-between selection:bg-indigo-500 selection:text-white"
+      x-data="{
+          step: 0,
+          loading: false,
+          showResults: false,
+          
+          // Supabase Auth State
+          supabaseClient: null,
+          user: null,
+          authEmail: '',
+          authPassword: '',
+          authMode: 'signin', 
+          
+          // Matrix Input Variables
+          academicBaseline: '',
+          workStyle: '',
+          geolocation: '',
+          customPath: '',
+          skillsPool: ['Logic & Analysis', 'Technical Writing', 'UI/UX Design', 'Systems Organization', 'Software Architecture', 'Data Analytics', 'Public Speaking', 'Financial Modeling', 'Cybersecurity Ops', 'Product Management'],
+          selectedSkills: [],
+          customSkillInput: '',
+          
+          // Toast Notification Management
+          toastMessage: '',
+          showToast: false,
+          triggerToast(msg) {
+              this.toastMessage = msg;
+              this.showToast = true;
+              setTimeout(() => { this.showToast = false; }, 6000);
+          },
+
+          // Initialize Supabase Auth
+          async initSupabase() {
+              const SUPABASE_URL = '{{ supabase_url }}';
+              const SUPABASE_KEY = '{{ supabase_anon_key }}';
+
+              if (window.supabase && SUPABASE_URL) {
+                  this.supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
+                  // Check existing session
+                  const { data: { session } } = await this.supabaseClient.auth.getSession();
+                  if (session) {
+                      this.user = session.user;
+                      this.step = 1;
+                  }
+
+                  // Listen for session state changes
+                  this.supabaseClient.auth.onAuthStateChange((_event, session) => {
+                      this.user = session ? session.user : null;
+                      this.step = session ? 1 : 0;
+                  });
+              }
+          },
+
+          async handleOAuth(provider) {
+              if (!this.supabaseClient) {
+                  this.triggerToast('Simulated ' + provider + ' auth active. Connect your Supabase keys in JS to enable live OAuth.');
+                  this.user = { email: provider.toLowerCase() + '_user@pathfinder.ai' };
+                  this.step = 1;
+                  return;
+              }
+
+              let authOptions = {
+                  redirectTo: window.location.origin
+              };
+
+              // [FIX] Force Google to always show the account selection prompt
+              if (provider.toLowerCase() === 'google') {
+                  authOptions.queryParams = {
+                      access_type: 'offline',
+                      prompt: 'consent select_account'
+                  };
+              }
+
+              const { error } = await this.supabaseClient.auth.signInWithOAuth({
+                  provider: provider.toLowerCase(),
+                  options: authOptions
+              });
+              
+              if (error) this.triggerToast('Auth Error: ' + error.message);
+          },
+
+          async handleEmailAuth() {
+              if (!this.authEmail || !this.authPassword) {
+                  this.triggerToast('Please provide both email and password.');
+                  return;
+              }
+              if (!this.supabaseClient) {
+                  this.triggerToast('Sign-in simulated! Directing to Navigator...');
+                  this.user = { email: this.authEmail };
+                  this.step = 1;
+                  return;
+              }
+
+              if (this.authMode === 'signup') {
+                  const { data, error } = await this.supabaseClient.auth.signUp({
+                      email: this.authEmail,
+                      password: this.authPassword
+                  });
+                  if (error) this.triggerToast(error.message);
+                  else {
+                      this.triggerToast('Account created! Please check your email for verification.');
+                  }
+              } else {
+                  const { data, error } = await this.supabaseClient.auth.signInWithPassword({
+                      email: this.authEmail,
+                      password: this.authPassword
+                  });
+                  if (error) this.triggerToast(error.message);
+                  else {
+                      this.user = data.user;
+                      this.triggerToast('Authenticated successfully!');
+                      this.step = 1;
+                  }
+              }
+          },
+
+          async signOut() {
+              if (this.supabaseClient) {
+                  await this.supabaseClient.auth.signOut();
+              }
+              this.user = null;
+              this.step = 0;
+              this.triggerToast('Signed out successfully.');
+          },
+
+          showQuiz: false,
+          quizStep: 0,
+          quizAnswers: {},
+          quizQuestions: [
+              {
+                  id: 1,
+                  text: 'When tackling a new project, what is your natural first instinct?',
+                  options: [
+                      { text: 'Deconstruct data, break down statistics, and find logical patterns.', skills: ['Data Analytics', 'Logic & Analysis'] },
+                      { text: 'Sketch how it will look visually and design the overall user experience.', skills: ['UI/UX Design'] },
+                      { text: 'Organize the team, establish workflows, and keep stakeholders aligned.', skills: ['Product Management', 'Systems Organization'] },
+                      { text: 'Write down clear guidelines, draft process steps, or explain the core concept.', skills: ['Technical Writing', 'Public Speaking'] }
+                  ]
+              },
+              {
+                  id: 2,
+                  text: 'Which of these professional challenges sounds most exciting to solve?',
+                  options: [
+                      { text: 'Investigating why a complex cloud structure or cybersecurity layer crashed.', skills: ['Software Architecture', 'Cybersecurity Ops'] },
+                      { text: 'Formulating a corporate financial growth template or calculating cost ratios.', skills: ['Financial Modeling'] },
+                      { text: 'Delivering a persuasive pitch or representing a vision directly to a crowd.', skills: ['Public Speaking', 'Product Management'] },
+                      { text: 'Sleeking up digital interfaces so actions feel entirely intuitive.', skills: ['UI/UX Design'] }
+                  ]
+              },
+              {
+                  id: 3,
+                  text: 'How do you prefer to approach problem-solving under heavy pressure?',
+                  options: [
+                      { text: 'Using highly objective technical parameters and testing variables step-by-step.', skills: ['Logic & Analysis', 'Data Analytics'] },
+                      { text: 'Visualizing high-level architectural configurations and component dependencies.', skills: ['Software Architecture', 'Systems Organization'] },
+                      { text: 'Empathizing with end-users to discover structural flow frictions.', skills: ['UI/UX Design', 'Product Management'] },
+                      { text: 'Synthesizing all background research into actionable written specs.', skills: ['Technical Writing'] }
+                  ]
+              },
+              {
+                  id: 4,
+                  text: 'In a group or cooperative team dynamic, what role do you assume naturally?',
+                  options: [
+                      { text: 'The technical architect designing the core backend blueprint.', skills: ['Software Architecture', 'Cybersecurity Ops'] },
+                      { text: 'The timeline controller tracking deadlines, deliverables, and tasks.', skills: ['Systems Organization', 'Product Management'] },
+                      { text: 'The lead presenter summarizing features and taking questions.', skills: ['Public Speaking'] },
+                      { text: 'The spreadsheet expert organizing statistics and data validations.', skills: ['Data Analytics', 'Financial Modeling'] }
+                  ]
+              },
+              {
+                  id: 5,
+                  text: 'What type of specialized workspace environment appeals to you most?',
+                  options: [
+                      { text: 'An analytical security center testing server systems and mitigating network flaws.', skills: ['Cybersecurity Ops', 'Software Architecture'] },
+                      { text: 'A clean software studio drafting user-centered interfaces and interactive wireframes.', skills: ['UI/UX Design'] },
+                      { text: 'A business war-room planning market strategy, capitalization, and financial forecasts.', skills: ['Financial Modeling', 'Product Management'] },
+                      { text: 'A technical library crafting software reference APIs and structural developer documentation.', skills: ['Technical Writing', 'Logic & Analysis'] }
+                  ]
+              }
+          ],
+          startQuiz() {
+              this.showQuiz = true;
+              this.quizStep = 0;
+              this.quizAnswers = {};
+              this.triggerToast('Diagnostic Assessor initialized. Answer questions to detect your top skills!');
+          },
+          selectQuizAnswer(optIndex) {
+              this.quizAnswers[this.quizStep] = optIndex;
+          },
+          nextQuizStep() {
+              if (this.quizAnswers[this.quizStep] === undefined) {
+                  this.triggerToast('Please pick an answer option before moving forward.');
+                  return;
+              }
+              if (this.quizStep < this.quizQuestions.length - 1) {
+                  this.quizStep++;
+              } else {
+                  this.tallyQuizResults();
+              }
+          },
+          prevQuizStep() {
+              if (this.quizStep > 0) this.quizStep--;
+          },
+          tallyQuizResults() {
+              let counts = {};
+              this.skillsPool.forEach(s => counts[s] = 0);
+              
+              for (let qIndex = 0; qIndex < this.quizQuestions.length; qIndex++) {
+                  let selectedOptIndex = this.quizAnswers[qIndex];
+                  if (selectedOptIndex !== undefined) {
+                      let skillsToIncrement = this.quizQuestions[qIndex].options[selectedOptIndex].skills;
+                      skillsToIncrement.forEach(sk => {
+                          if (counts[sk] !== undefined) counts[sk]++;
+                      });
+                  }
+              }
+              
+              let sortedSkills = Object.keys(counts).sort((a, b) => counts[b] - counts[a]);
+              let topStrengths = sortedSkills.slice(0, 3);
+              
+              topStrengths.forEach(str => {
+                  if (!this.selectedSkills.includes(str)) this.selectedSkills.push(str);
+              });
+              
+              this.showQuiz = false;
+              this.triggerToast('Assessment Success! Identified Strengths: ' + topStrengths.join(', ') + ' added.');
+          },
+
+          toggleSkill(skill) {
+              if (this.selectedSkills.includes(skill)) {
+                  this.selectedSkills = this.selectedSkills.filter(s => s !== skill);
+              } else {
+                  this.selectedSkills.push(skill);
+              }
+          },
+          addCustomSkill() {
+              const cleanedSkill = this.customSkillInput.trim();
+              if (cleanedSkill) {
+                  if (!this.selectedSkills.includes(cleanedSkill)) this.selectedSkills.push(cleanedSkill);
+                  if (!this.skillsPool.includes(cleanedSkill)) this.skillsPool.push(cleanedSkill);
+                  this.customSkillInput = '';
+              }
+          },
+          
+          activeTab: 0,
+          matrixData: { careers: [] },
+          currentCareer() {
+              return (this.matrixData && this.matrixData.careers && this.matrixData.careers[this.activeTab]) ? this.matrixData.careers[this.activeTab] : {};
+          },
+          async executeInferencePipeline() {
+              if (!this.academicBaseline || !this.workStyle || this.selectedSkills.length === 0 || !this.geolocation) {
+                  this.triggerToast('Please fill out all operational vectors before compiling.');
+                  return;
+              }
+              this.loading = true;
+              this.step = 4;
+              
+              try {
+                  const response = await fetch('/api/navigate', {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({
+                          academicBaseline: this.academicBaseline,
+                          workStyle: this.workStyle,
+                          selectedSkills: this.selectedSkills,
+                          geolocation: this.geolocation,
+                          customPath: this.customPath,
+                          userId: this.user ? this.user.id : null
+                      })
+                  });
+                  
+                  if (!response.ok) {
+                      const errData = await response.json();
+                      throw new Error(errData.details || errData.error || 'Server pipeline error.');
+                  }
+                  
+                  this.matrixData = await response.json();
+                  this.activeTab = 0;
+                  this.showResults = true;
+              } catch (error) {
+                  this.triggerToast('Pipeline Interruption: ' + error.message);
+                  this.step = 3;
+              } finally {
+                  this.loading = false;
+              }
+          }
+      }"
+      x-init="initSupabase()">
+    
+    <div x-show="showToast" 
+         x-transition:enter="transition ease-out duration-300"
+         x-transition:enter-start="opacity-0 translate-y-4 scale-95"
+         x-transition:enter-end="opacity-100 translate-y-0 scale-100"
+         x-transition:leave="transition ease-in duration-200"
+         x-transition:leave-start="opacity-100 scale-100"
+         x-transition:leave-end="opacity-0 scale-95"
+         class="fixed bottom-6 right-6 z-50 max-w-sm w-full bg-slate-950/95 border border-indigo-500/40 backdrop-blur-xl p-4 rounded-2xl shadow-[0_10px_40px_rgba(99,102,241,0.25)] flex items-center space-x-3 text-slate-100" style="display: none;">
+        <div class="flex-shrink-0 bg-indigo-500/20 p-2.5 rounded-xl text-indigo-400 border border-indigo-500/30">
+            <svg class="w-5 h-5 animate-pulse" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+            </svg>
+        </div>
+        <div class="flex-1 text-xs font-semibold leading-relaxed" x-text="toastMessage"></div>
+        <button @click="showToast = false" class="text-slate-400 hover:text-white transition-colors p-1 rounded-lg hover:bg-slate-800 cursor-pointer text-sm font-bold">&times;</button>
+    </div>
+
+    <header class="border-b border-slate-800/60 backdrop-blur-xl bg-slate-950/40 sticky top-0 z-40">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-18 flex items-center justify-between">
+            <div class="flex items-center space-x-3 cursor-pointer" @click="step = 0">
+                <div class="w-9 h-9 rounded-xl bg-gradient-to-tr from-indigo-500 via-purple-500 to-cyan-400 p-[1px] flex items-center justify-center shadow-[0_0_20px_rgba(99,102,241,0.3)]">
+                    <div class="w-full h-full bg-slate-950 rounded-[11px] flex items-center justify-center">
+                        <svg class="w-5 h-5 text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 20l-5.447-2.724A2 2 0 013 15.482V5.518a2 2 0 011.106-1.789l5.447-2.724a2 2 0 011.894 0l5.447 2.724A2 2 0 0118 5.518v9.964a2 2 0 01-1.106 1.789L11.447 20a2 2 0 01-1.894 0z"></path>
+                        </svg>
+                    </div>
+                </div>
+                <span class="text-xl font-extrabold tracking-tight bg-gradient-to-r from-white via-slate-200 to-slate-400 bg-clip-text text-transparent">
+                    PathFinder <span class="bg-gradient-to-r from-indigo-400 to-cyan-400 bg-clip-text text-transparent">AI</span>
+                </span>
+                <span class="text-[10px] uppercase font-extrabold text-indigo-400 bg-indigo-500/10 border border-indigo-500/20 px-2 py-0.5 rounded-full font-mono hidden sm:inline-block">US Matrix v2.6</span>
+            </div>
+
+            <div class="flex items-center space-x-4">
+                <template x-if="user">
+                    <div class="flex items-center space-x-3 bg-slate-900 border border-slate-800 px-3 py-1.5 rounded-xl">
+                        <span class="text-xs text-indigo-400 font-mono font-bold" x-text="user.email ? user.email.split('@')[0] : 'User'"></span>
+                        <button @click="signOut()" class="text-xs text-slate-400 hover:text-white font-semibold cursor-pointer">Sign Out</button>
+                    </div>
+                </template>
+
+                <template x-if="step > 0 && step <= 3">
+                    <div class="flex items-center space-x-3">
+                        <span class="text-xs text-slate-400 font-mono hidden sm:inline" x-text="'Pipeline Step: ' + step + '/3'"></span>
+                        <span class="inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold bg-cyan-500/10 text-cyan-400 border border-cyan-500/20 shadow-[0_0_15px_rgba(6,182,212,0.15)]">
+                            <span class="w-2 h-2 rounded-full bg-cyan-400 mr-2 animate-ping"></span>
+                            Live Assessment
+                        </span>
+                    </div>
+                </template>
+
+                <template x-if="step === 0 && !user">
+                    <button @click="step = 1" class="px-4 py-2 rounded-xl text-xs font-bold bg-indigo-500 hover:bg-indigo-400 text-slate-950 transition-all shadow-[0_0_20px_rgba(99,102,241,0.3)] cursor-pointer">
+                        Launch Navigator
+                    </button>
+                </template>
+            </div>
+        </div>
+    </header>
+
+    <main class="flex-grow flex items-center justify-center p-4 sm:p-6 lg:p-8 w-full max-w-7xl mx-auto">
+
+        <div x-show="step === 0" 
+             x-transition:enter="transition ease-out duration-500"
+             x-transition:enter-start="opacity-0 translate-y-6"
+             x-transition:enter-end="opacity-100 translate-y-0"
+             class="w-full space-y-12 py-6">
+            
+            <div class="text-center max-w-3xl mx-auto space-y-6">
+                <div class="inline-flex items-center space-x-2 px-3.5 py-1.5 rounded-full bg-indigo-500/10 border border-indigo-500/20 text-indigo-300 text-xs font-mono font-semibold">
+                    <svg class="w-4 h-4 text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path>
+                    </svg>
+                    <span>US Macro-Economic Career Engine</span>
+                </div>
+
+                <h1 class="text-4xl sm:text-6xl font-black text-white tracking-tight leading-tight">
+                    Navigate Your Future in the <span class="bg-gradient-to-r from-indigo-400 via-purple-400 to-cyan-400 bg-clip-text text-transparent">US Job Economy</span>
+                </h1>
+
+                <p class="text-slate-400 text-base sm:text-lg leading-relaxed font-normal">
+                    PathFinder AI evaluates your unique academic baseline, operational work preferences, and skill competencies to synthesize structured, high-growth US career matrices with 10-year salary forecasts and automation disruption resilience.
+                </p>
+            </div>
+
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-6 max-w-5xl mx-auto">
+                <div class="glass-panel p-6 rounded-2xl relative overflow-hidden space-y-4">
+                    <div class="w-12 h-12 rounded-xl bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center text-indigo-400">
+                        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"></path>
+                        </svg>
+                    </div>
+                    <h3 class="text-lg font-bold text-white">1. Map Your Vector</h3>
+                    <p class="text-slate-400 text-xs sm:text-sm leading-relaxed">
+                        Input your academic background, preferred work dynamic, and functional technical strengths or take our integrated Diagnostic Assessor.
+                    </p>
+                </div>
+
+                <div class="glass-panel p-6 rounded-2xl relative overflow-hidden space-y-4">
+                    <div class="w-12 h-12 rounded-xl bg-purple-500/10 border border-purple-500/20 flex items-center justify-center text-purple-400">
+                        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6"></path>
+                        </svg>
+                    </div>
+                    <h3 class="text-lg font-bold text-white">2. AI Market Synthesis</h3>
+                    <p class="text-slate-400 text-xs sm:text-sm leading-relaxed">
+                        Groq inference engine processes your profile against live US Department of Labor shifts, industry benchmarks, and regional tech hub dynamics.
+                    </p>
+                </div>
+
+                <div class="glass-panel p-6 rounded-2xl relative overflow-hidden space-y-4">
+                    <div class="w-12 h-12 rounded-xl bg-cyan-500/10 border border-cyan-500/20 flex items-center justify-center text-cyan-400">
+                        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"></path>
+                        </svg>
+                    </div>
+                    <h3 class="text-lg font-bold text-white">3. Strategic Roadmap</h3>
+                    <p class="text-slate-400 text-xs sm:text-sm leading-relaxed">
+                        Unlock 3 personalized US career trajectories, complete with USD compensation ladders, daily routines, and 3-step action plans.
+                    </p>
+                </div>
+            </div>
+
+            <div class="max-w-md mx-auto glass-panel p-8 rounded-3xl space-y-6 border border-indigo-500/20 shadow-[0_0_50px_rgba(99,102,241,0.15)]">
+                <div class="text-center space-y-1">
+                    <h3 class="text-xl font-extrabold text-white">Get Started with PathFinder</h3>
+                    <p class="text-slate-400 text-xs">Sign in via Supabase Auth or proceed to build your market matrix.</p>
+                </div>
+
+                <div class="space-y-3">
+                    <button @click="handleOAuth('google')" class="w-full flex items-center justify-center space-x-3 px-4 py-3 rounded-xl bg-slate-900 border border-slate-800 hover:border-slate-700 hover:bg-slate-850 transition-all font-semibold text-xs text-slate-200 cursor-pointer">
+                        <svg class="w-4 h-4" viewBox="0 0 24 24">
+                            <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
+                            <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
+                            <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z"/>
+                            <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"/>
+                        </svg>
+                        <span>Continue with Google</span>
+                    </button>
+
+                    <button @click="handleOAuth('apple')" class="w-full flex items-center justify-center space-x-3 px-4 py-3 rounded-xl bg-slate-900 border border-slate-800 hover:border-slate-700 hover:bg-slate-850 transition-all font-semibold text-xs text-slate-200 cursor-pointer">
+                        <svg class="w-4 h-4 fill-current text-white" viewBox="0 0 24 24">
+                            <path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.81-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M15.97 6.33c.66-.8 1.11-1.92.99-3.04-.96.04-2.12.64-2.8 1.44-.61.71-1.14 1.86-1 2.97 1.08.08 2.15-.57 2.81-1.37z"/>
+                        </svg>
+                        <span>Continue with Apple</span>
+                    </button>
+                </div>
+
+                <div class="relative flex py-2 items-center">
+                    <div class="flex-grow border-t border-slate-800"></div>
+                    <span class="flex-shrink mx-4 text-slate-500 text-[10px] uppercase font-mono tracking-widest">Or Email</span>
+                    <div class="flex-grow border-t border-slate-800"></div>
+                </div>
+
+                <form @submit.prevent="handleEmailAuth()" class="space-y-3">
+                    <input type="email" x-model="authEmail" placeholder="user@domain.com" class="w-full glass-input rounded-xl px-4 py-2.5 text-xs text-slate-200 placeholder:text-slate-600 focus:outline-none">
+                    <input type="password" x-model="authPassword" placeholder="Password" class="w-full glass-input rounded-xl px-4 py-2.5 text-xs text-slate-200 placeholder:text-slate-600 focus:outline-none">
+                    
+                    <button type="submit" class="w-full py-3 rounded-xl font-bold text-xs text-slate-950 bg-gradient-to-r from-indigo-400 to-purple-400 hover:brightness-110 transition-all cursor-pointer shadow-[0_0_20px_rgba(99,102,241,0.25)]" x-text="authMode === 'signup' ? 'Create Supabase Account' : 'Sign In with Password'">
+                    </button>
+                </form>
+
+                <div class="flex items-center justify-between text-[11px] text-slate-400 pt-1 font-mono">
+                    <button @click="authMode = authMode === 'signin' ? 'signup' : 'signin'" class="hover:text-indigo-400 cursor-pointer underline">
+                        <span x-text="authMode === 'signin' ? 'Need an account? Sign up' : 'Have an account? Sign in'"></span>
+                    </button>
+                    <button @click="step = 1" class="hover:text-cyan-400 cursor-pointer">
+                        Skip & Guest Mode &rarr;
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <div x-show="step >= 1 && step <= 3" 
+             x-transition:enter="transition ease-out duration-500"
+             x-transition:enter-start="opacity-0 scale-95"
+             x-transition:enter-end="opacity-100 scale-100"
+             class="w-full max-w-2xl glass-panel p-6 sm:p-10 rounded-3xl relative overflow-hidden transition-all duration-300" style="display: none;">
+            
+            <div class="mb-8 relative z-10">
+                <div class="flex items-center justify-between text-xs font-mono tracking-wider text-slate-400 uppercase mb-3">
+                    <span x-show="step === 1">Step 01: US Baseline Profile</span>
+                    <span x-show="step === 2">Step 02: Core Competencies</span>
+                    <span x-show="step === 3">Step 03: Market Geolocation</span>
+                    <span class="text-indigo-400 font-bold" x-text="Math.round((step/3)*100) + '% Completed'"></span>
+                </div>
+                <div class="h-2 w-full bg-slate-950 rounded-full overflow-hidden border border-slate-800/50 p-0.5">
+                    <div class="h-full bg-gradient-to-r from-indigo-500 via-purple-500 to-cyan-400 rounded-full transition-all duration-500 shadow-[0_0_12px_rgba(99,102,241,0.5)]"
+                         :style="'width: ' + (step === 1 ? '33.33%' : step === 2 ? '66.66%' : '100%')"></div>
+                </div>
+            </div>
+
+            <div x-show="step === 1" class="space-y-6 relative z-10">
+                <div>
+                    <h2 class="text-2xl font-black text-white tracking-tight mb-1">US Career Standing</h2>
+                    <p class="text-slate-400 text-xs sm:text-sm">Define your current trajectory within the United States academic or professional ecosystem.</p>
+                </div>
+
+                <div class="space-y-4">
+                    <div>
+                        <label class="block text-xs font-bold uppercase tracking-wider text-slate-400 mb-2 font-mono">Academic / Experience Level</label>
+                        <select x-model="academicBaseline" class="w-full glass-input rounded-xl px-4 py-3 text-sm text-slate-200 focus:outline-none cursor-pointer">
+                            <option value="" class="bg-slate-950">Select baseline status...</option>
+                            <option value="US High School Senior" class="bg-slate-950">US High School Senior / Pre-College</option>
+                            <option value="US Undergrad Student (STEM)" class="bg-slate-950">US Undergraduate Student (STEM Major / CS)</option>
+                            <option value="US Undergrad Student (Non-STEM)" class="bg-slate-950">US Undergraduate Student (Humanities / Business)</option>
+                            <option value="US Industry Professional" class="bg-slate-950">Active US Domestic Working Professional</option>
+                        </select>
+                    </div>
+
+                    <div>
+                        <label class="block text-xs font-bold uppercase tracking-wider text-slate-400 mb-2 font-mono">Work-Style Culture Dynamic</label>
+                        <select x-model="workStyle" class="w-full glass-input rounded-xl px-4 py-3 text-sm text-slate-200 focus:outline-none cursor-pointer">
+                            <option value="" class="bg-slate-950">Select preferred dynamic...</option>
+                            <option value="Remote First / Distributed Engineering" class="bg-slate-950">Remote First / Distributed Engineering</option>
+                            <option value="In-Office Collaborative / Silicon Valley Dynamic" class="bg-slate-950">In-Office Collaborative / Tech Hub War Room</option>
+                            <option value="Hybrid Dynamic / High Autonomy" class="bg-slate-950">Hybrid Dynamic / High Autonomy</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div class="flex justify-end pt-4 border-t border-slate-800/60">
+                    <button @click="if(academicBaseline && workStyle) step = 2; else triggerToast('Please select both baseline parameters.');" 
+                            class="px-6 py-3 rounded-xl text-xs font-bold text-slate-950 bg-indigo-400 hover:bg-indigo-300 transition-all cursor-pointer flex items-center space-x-2">
+                        <span>Continue to Skills</span>
+                        <span>&rarr;</span>
+                    </button>
+                </div>
+            </div>
+
+            <div x-show="step === 2" class="space-y-6 relative z-10" style="display: none;">
+                <div>
+                    <h2 class="text-2xl font-black text-white tracking-tight mb-1">Core Technical Strengths</h2>
+                    <p class="text-slate-400 text-xs sm:text-sm">Select your active skill attributes or launch our AI Strength Assessor.</p>
+                </div>
+
+                <div class="bg-gradient-to-r from-indigo-950/60 via-purple-950/40 to-slate-950 border border-indigo-500/30 rounded-2xl p-4 flex flex-col sm:flex-row items-center justify-between gap-4">
+                    <div class="space-y-1 text-center sm:text-left">
+                        <span class="text-[10px] font-bold text-indigo-300 tracking-wider font-mono block uppercase">Interactive Strength Assessor</span>
+                        <p class="text-xs text-slate-300">Unsure of your strengths? Discover them with our 5-question wizard.</p>
+                    </div>
+                    <button type="button" @click="startQuiz()" class="px-4 py-2 bg-indigo-500 hover:bg-indigo-400 text-slate-950 text-xs font-bold rounded-xl transition-all shadow-[0_0_15px_rgba(99,102,241,0.3)] cursor-pointer flex-shrink-0">
+                        Launch Assessor
+                    </button>
+                </div>
+
+                <div>
+                    <label class="block text-xs font-bold uppercase tracking-wider text-slate-400 mb-3 font-mono">Available Strength Vectors (Select 1+)</label>
+                    <div class="flex flex-wrap gap-2">
+                        <template x-for="skill in skillsPool" :key="skill">
+                            <button @click="toggleSkill(skill)" 
+                                    class="px-3.5 py-2 text-xs font-semibold rounded-xl border transition-all duration-200 cursor-pointer"
+                                    :class="selectedSkills.includes(skill) ? 'bg-indigo-500/20 text-indigo-300 border-indigo-500/80 shadow-[0_0_15px_rgba(99,102,241,0.2)]' : 'bg-slate-950/60 text-slate-400 border-slate-800 hover:border-slate-700 hover:text-slate-200'">
+                                <span x-text="skill"></span>
+                                <span x-show="selectedSkills.includes(skill)" class="ml-1.5 font-bold text-indigo-400">&times;</span>
+                            </button>
+                        </template>
+                    </div>
+                </div>
+
+                <div class="border-t border-slate-800/60 pt-4">
+                    <label class="block text-xs font-bold uppercase tracking-wider text-slate-400 mb-2 font-mono">Add Custom Specialized Skill</label>
+                    <div class="flex gap-2">
+                        <input type="text" x-model="customSkillInput" @keydown.enter.prevent="addCustomSkill()" placeholder="e.g. Quantitative Trading, ML System Ops..." class="flex-grow glass-input rounded-xl px-4 py-2.5 text-xs text-slate-200 placeholder:text-slate-600 focus:outline-none">
+                        <button type="button" @click="addCustomSkill()" class="px-4 py-2.5 rounded-xl font-bold text-xs text-slate-950 bg-indigo-400 hover:bg-indigo-300 transition-all cursor-pointer">
+                            Add Skill
+                        </button>
+                    </div>
+                </div>
+
+                <div class="flex justify-between pt-4 border-t border-slate-800/60">
+                    <button @click="step = 1" class="px-5 py-2.5 rounded-xl text-xs font-bold text-slate-300 border border-slate-800 cursor-pointer">Back</button>
+                    <button @click="if(selectedSkills.length > 0) step = 3; else triggerToast('Please select at least 1 core skill.');" 
+                            class="px-6 py-2.5 rounded-xl text-xs font-bold text-slate-950 bg-indigo-400 hover:bg-indigo-300 transition-all cursor-pointer flex items-center space-x-2">
+                        <span>Continue to Location</span>
+                        <span>&rarr;</span>
+                    </button>
+                </div>
+            </div>
+
+            <template x-if="showQuiz">
+                <div class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md">
+                    <div class="bg-slate-900 border border-indigo-500/30 w-full max-w-lg rounded-3xl p-6 space-y-6 shadow-2xl relative">
+                        <div class="flex items-center justify-between border-b border-slate-800 pb-4">
+                            <span class="text-xs font-mono text-indigo-400 font-bold uppercase" x-text="'Question ' + (quizStep + 1) + ' of ' + quizQuestions.length"></span>
+                            <button @click="showQuiz = false" class="text-slate-400 hover:text-white text-lg font-bold cursor-pointer">&times;</button>
+                        </div>
+
+                        <div class="p-5 bg-slate-950/60 rounded-2xl border border-slate-800/80">
+                            <p class="text-sm sm:text-base font-bold text-slate-100" x-text="quizQuestions[quizStep].text"></p>
+                        </div>
+
+                        <div class="space-y-2.5">
+                            <template x-for="(opt, oIdx) in quizQuestions[quizStep].options" :key="oIdx">
+                                <button type="button" @click="selectQuizAnswer(oIdx)" 
+                                        class="w-full text-left p-3.5 rounded-xl border text-xs font-medium transition-all cursor-pointer flex items-center justify-between"
+                                        :class="quizAnswers[quizStep] === oIdx ? 'bg-indigo-950/40 border-indigo-500 text-white shadow-[0_0_15px_rgba(99,102,241,0.15)] font-semibold' : 'bg-slate-950/40 border-slate-800/80 text-slate-300 hover:border-slate-700 hover:text-white'">
+                                    <span x-text="opt.text"></span>
+                                    <div class="w-4 h-4 rounded-full border flex items-center justify-center flex-shrink-0 ml-3"
+                                         :class="quizAnswers[quizStep] === oIdx ? 'border-indigo-400 bg-indigo-500/20' : 'border-slate-700'">
+                                        <div class="w-2 h-2 rounded-full bg-indigo-400" x-show="quizAnswers[quizStep] === oIdx"></div>
+                                    </div>
+                                </button>
+                            </template>
+                        </div>
+
+                        <div class="flex justify-between pt-4 border-t border-slate-800/60">
+                            <button type="button" @click="prevQuizStep()" :disabled="quizStep === 0" class="px-4 py-2 rounded-xl text-xs font-bold text-slate-300 border border-slate-800 disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer">
+                                Back
+                            </button>
+                            <button type="button" @click="nextQuizStep()" class="px-5 py-2 rounded-xl text-xs font-extrabold text-slate-950 bg-gradient-to-r from-indigo-400 to-purple-400 hover:brightness-110 transition-all cursor-pointer" x-text="quizStep === quizQuestions.length - 1 ? 'Analyze Strengths' : 'Next Question &rarr;'">
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </template>
+
+            <div x-show="step === 3" class="space-y-6 relative z-10" style="display: none;">
+                <div>
+                    <h2 class="text-2xl font-black text-white tracking-tight mb-1">Target US Market Vector</h2>
+                    <p class="text-slate-400 text-xs sm:text-sm">Pinpoint geographic focus to calibrate salary indexes, DOL trends, and regional hiring clusters.</p>
+                </div>
+
+                <div class="space-y-4">
+                    <div>
+                        <label class="block text-xs font-bold uppercase tracking-wider text-slate-400 mb-2 font-mono">US Target Geographic Hub</label>
+                        <select x-model="geolocation" class="w-full glass-input rounded-xl px-4 py-3 text-sm text-slate-200 focus:outline-none cursor-pointer">
+                            <option value="" class="bg-slate-950">Select market region...</option>
+                            <option value="Silicon Valley / SF Bay Area Tech Corridor" class="bg-slate-950">Silicon Valley / SF Bay Area Tech Corridor</option>
+                            <option value="NYC Metro / East Coast Financial District" class="bg-slate-950">NYC Metro / East Coast Financial District</option>
+                            <option value="Austin / Texas Emerging Tech Triangle" class="bg-slate-950">Austin / Texas Emerging Tech Triangle</option>
+                            <option value="Seattle Metro / Pacific Northwest Cloud Tech" class="bg-slate-950">Seattle Metro / Pacific Northwest Cloud Tech</option>
+                            <option value="US National Remote Economy" class="bg-slate-950">US National Remote Economy</option>
+                        </select>
+                    </div>
+
+                    <div>
+                        <label class="block text-xs font-bold uppercase tracking-wider text-slate-400 mb-2 font-mono">Custom Focus Override (Optional)</label>
+                        <input type="text" x-model="customPath" placeholder="e.g. Focus on AI Hardware, Quantum Systems, Renewable Tech..." class="w-full glass-input rounded-xl px-4 py-3 text-xs text-slate-200 placeholder:text-slate-600 focus:outline-none">
+                    </div>
+                </div>
+
+                <div class="flex justify-between pt-4 border-t border-slate-800/60">
+                    <button @click="step = 2" class="px-5 py-2.5 rounded-xl text-xs font-bold text-slate-300 border border-slate-800 cursor-pointer">Back</button>
+                    <button @click="executeInferencePipeline()" 
+                            class="px-8 py-3 rounded-xl text-xs font-extrabold text-slate-950 bg-gradient-to-r from-indigo-400 via-purple-400 to-cyan-400 hover:brightness-110 transition-all shadow-[0_0_25px_rgba(99,102,241,0.4)] cursor-pointer flex items-center space-x-2">
+                        <span>Synthesize Strategy Matrix</span>
+                        <span>&rarr;</span>
+                    </button>
+                </div>
+            </div>
+
+        </div>
+
+        <div x-show="step === 4 && loading" 
+             class="w-full max-w-5xl glass-panel p-8 sm:p-12 rounded-3xl space-y-8 animate-pulse" style="display: none;">
+            <div class="flex items-center justify-between border-b border-slate-800 pb-4">
+                <div class="h-6 w-1/3 bg-slate-800/80 rounded-lg"></div>
+                <div class="h-4 w-24 bg-slate-800/80 rounded-lg"></div>
+            </div>
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+                <div class="h-72 bg-slate-800/40 border border-slate-800/50 rounded-2xl p-4 space-y-4">
+                    <div class="h-5 w-2/3 bg-slate-800/80 rounded"></div>
+                    <div class="h-3 w-full bg-slate-800/80 rounded"></div>
+                    <div class="h-3 w-5/6 bg-slate-800/80 rounded"></div>
+                </div>
+                <div class="h-72 bg-slate-800/40 border border-slate-800/50 rounded-2xl p-4 space-y-4">
+                    <div class="h-5 w-1/2 bg-slate-800/80 rounded"></div>
+                    <div class="h-3 w-full bg-slate-800/80 rounded"></div>
+                    <div class="h-3 w-4/5 bg-slate-800/80 rounded"></div>
+                </div>
+                <div class="h-72 bg-slate-800/40 border border-slate-800/50 rounded-2xl p-4 space-y-4">
+                    <div class="h-5 w-3/4 bg-slate-800/80 rounded"></div>
+                    <div class="h-3 w-full bg-slate-800/80 rounded"></div>
+                    <div class="h-3 w-full bg-slate-800/80 rounded"></div>
+                </div>
+            </div>
+        </div>
+
+        <div x-show="step === 4 && showResults" 
+             x-transition:enter="transition ease-out duration-500"
+             x-transition:enter-start="opacity-0 scale-95"
+             x-transition:enter-end="opacity-100 scale-100"
+             class="w-full max-w-6xl glass-panel p-6 sm:p-10 rounded-3xl space-y-8 relative overflow-hidden transition-all duration-500" style="display: none;">
+            
+            <div class="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-800/80 pb-6 relative z-10">
+                <div>
+                    <h2 class="text-2xl sm:text-3xl font-black text-white tracking-tight">US Strategic Navigation Matrix</h2>
+                    <p class="text-xs sm:text-sm text-slate-400 mt-1">
+                        Compiled for <span class="text-indigo-400 font-bold" x-text="academicBaseline"></span> in <span class="text-cyan-400 font-bold" x-text="geolocation"></span>
+                    </p>
+                </div>
+                <button @click="step = 1; showResults = false;" class="self-start md:self-auto px-4 py-2 rounded-xl text-xs font-bold text-slate-300 border border-slate-800 hover:bg-slate-900 transition-all cursor-pointer">
+                    &larr; Re-Configure Matrix
+                </button>
+            </div>
+
+            <div class="flex flex-wrap gap-2 border-b border-slate-800/60 pb-4">
+                <template x-for="(career, idx) in matrixData.careers" :key="idx">
+                    <button @click="activeTab = idx" 
+                            class="px-5 py-3 rounded-2xl font-bold text-xs transition-all duration-300 cursor-pointer flex items-center space-x-2"
+                            :class="activeTab === idx ? 'bg-gradient-to-r from-indigo-500 to-purple-600 text-white shadow-[0_0_20px_rgba(99,102,241,0.3)]' : 'bg-slate-950/60 text-slate-400 border border-slate-800 hover:border-slate-700'">
+                        <span x-text="career.title"></span>
+                        <span class="text-[9px] uppercase px-2 py-0.5 rounded-full font-mono font-black"
+                              :class="activeTab === idx ? 'bg-slate-950/40 text-cyan-300' : 'bg-slate-900 text-slate-500'"
+                              x-text="career.alignment_type"></span>
+                    </button>
+                </template>
+            </div>
+
+            <div class="space-y-8">
+                <div class="grid grid-cols-1 lg:grid-cols-12 gap-6">
+                    <div class="lg:col-span-7 space-y-6">
+                        <div class="p-6 glass-card rounded-2xl space-y-3">
+                            <span class="text-[10px] font-bold tracking-widest uppercase text-indigo-400 block font-mono">Trajectory Breakdown</span>
+                            <h3 class="text-xl font-extrabold text-white" x-text="currentCareer().title"></h3>
+                            <p class="text-xs sm:text-sm text-slate-300 leading-relaxed" x-text="currentCareer().description"></p>
+                        </div>
+
+                        <div class="p-6 glass-card rounded-2xl space-y-3">
+                            <span class="text-[10px] font-bold tracking-widest uppercase text-purple-400 block font-mono">Required US Professional Credentials</span>
+                            <div class="flex flex-wrap gap-2 pt-1">
+                                <template x-for="cert in currentCareer().certifications" :key="cert">
+                                    <span class="px-3 py-1.5 rounded-xl bg-purple-500/10 border border-purple-500/30 text-purple-300 text-xs font-semibold font-mono" x-text="cert"></span>
+                                </template>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="lg:col-span-5 grid grid-cols-1 md:grid-cols-12 lg:grid-cols-1 gap-6">
+                        <div class="p-6 glass-card rounded-2xl flex flex-col items-center justify-center border-b md:border-b-0 md:border-r border-slate-800/80">
+                            <span class="text-[10px] font-bold tracking-widest uppercase text-slate-400 mb-4 block font-mono">Resilience Rating</span>
+                            <div class="relative w-28 h-28 flex items-center justify-center">
+                                <svg class="w-full h-full transform -rotate-90" viewBox="0 0 36 36">
+                                    <path class="text-slate-800" stroke-width="3" stroke="currentColor" fill="none" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" />
+                                    <path class="transition-all duration-700 text-indigo-400" stroke="currentColor" stroke-width="3" :stroke-dasharray="(currentCareer().future_proof_index || 0) + ', 100'" stroke-linecap="round" fill="none" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" />
+                                </svg>
+                                <div class="absolute flex flex-col items-center justify-center">
+                                    <span class="text-2xl font-black font-mono tracking-tight text-white" x-text="(currentCareer().future_proof_index || 0) + '%'"></span>
+                                    <span class="text-[8px] uppercase tracking-widest font-mono text-cyan-400 font-bold">Resilient</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="p-6 glass-card rounded-2xl flex flex-col justify-between space-y-4">
+                            <div>
+                                <span class="text-[10px] font-bold tracking-widest uppercase text-slate-400 block font-mono mb-2">Automation Disruption Risk</span>
+                                <div class="px-3 py-1.5 rounded-xl bg-slate-950 border border-slate-800 text-xs font-mono font-bold text-center"
+                                     :class="currentCareer().automation_risk === 'Low' ? 'text-emerald-400 border-emerald-500/30' : 'text-amber-400 border-amber-500/30'"
+                                     x-text="currentCareer().automation_risk + ' Risk Profile'"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="p-6 glass-card rounded-2xl space-y-4">
+                    <span class="text-[10px] font-bold tracking-widest uppercase text-cyan-400 block font-mono">10-Year USD Compensation Progression</span>
+                    <div class="grid grid-cols-1 md:grid-cols-3 gap-4 pt-2">
+                        <div class="p-4 bg-slate-950/60 border border-slate-800/80 rounded-2xl space-y-2">
+                            <span class="text-[10px] font-mono font-bold uppercase text-slate-500 block">Year 01 Baseline</span>
+                            <p class="text-sm font-bold text-white" x-text="currentCareer().timeline?.year_1?.title"></p>
+                            <span class="text-xs font-mono text-indigo-400 font-extrabold block" x-text="currentCareer().timeline?.year_1?.salary"></span>
+                        </div>
+                        <div class="p-4 bg-slate-950/60 border border-slate-800/80 rounded-2xl space-y-2">
+                            <span class="text-[10px] font-mono font-bold uppercase text-slate-500 block">Year 05 Expansion</span>
+                            <p class="text-sm font-bold text-white" x-text="currentCareer().timeline?.year_5?.title"></p>
+                            <span class="text-xs font-mono text-purple-400 font-extrabold block" x-text="currentCareer().timeline?.year_5?.salary"></span>
+                        </div>
+                        <div class="p-4 bg-slate-950/60 border border-slate-800/80 rounded-2xl space-y-2">
+                            <span class="text-[10px] font-mono font-bold uppercase text-slate-500 block">Year 10 Principal</span>
+                            <p class="text-sm font-bold text-white" x-text="currentCareer().timeline?.year_10?.title"></p>
+                            <span class="text-xs font-mono text-cyan-400 font-extrabold block" x-text="currentCareer().timeline?.year_10?.salary"></span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="p-6 glass-card rounded-2xl space-y-4">
+                    <span class="text-[10px] font-bold tracking-widest uppercase text-slate-400 block font-mono">Immediate Target Execution Bridge</span>
+                    <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                        <template x-for="stepItem in currentCareer().skill_gap_steps" :key="stepItem.step">
+                            <div class="p-4 bg-slate-950/60 border border-slate-800/80 rounded-2xl text-center flex flex-col items-center justify-center space-y-2">
+                                <span class="block text-indigo-400 font-black font-mono text-lg" x-text="stepItem.step"></span>
+                                <p class="text-[11px] text-slate-400 leading-relaxed" x-text="stepItem.description"></p>
+                            </div>
+                        </template>
+                    </div>
+                </div>
+            </div>
+
+        </div>
+
+    </main>
+
+    <footer class="border-t border-slate-800/60 bg-slate-950/60 py-6 text-center text-xs text-slate-500 font-mono tracking-wide backdrop-blur-md">
+        &copy; 2026 PathFinder AI Matrix Engine. Powered by Groq LLM Inference & Supabase Auth.
+    </footer>
+
+</body>
+</html>
